@@ -48,3 +48,7 @@ mlruns
 **/*build*
 ly_*
 log
+
+# Private secrets and configs
+.env
+watch_list.txt

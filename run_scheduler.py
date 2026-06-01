@@ -127,11 +127,8 @@ def get_next_trigger_time():
     schedule_times = [
         (9, 0),   # 盤前診斷 (美股開盤前 30 分鐘)
         (9, 30),  # 開盤第一時間分析
-        (10, 30), # 盤中每小時更新
-        (11, 30),
-        (12, 30),
+        (11, 30), # 盤中每兩小時更新
         (13, 30),
-        (14, 30),
         (15, 30),
         (16, 0),  # 收盤診斷
     ]
@@ -173,15 +170,10 @@ def main():
         print("\n🔍 偵測到 --test 參數，正在進行即時測試執行以確保排程呼叫正常...")
         print("-" * 45)
         result = subprocess.run(
-            [sys.executable, script_path],
-            capture_output=True,
-            text=True,
-            encoding="utf-8"
+            [sys.executable, script_path]
         )
-        print(result.stdout)
-        if result.stderr:
-            print("⚠️ 錯誤日誌輸出：")
-            print(result.stderr)
+        if result.returncode != 0:
+            print(f"\n⚠️ 分析程式執行時發生異常 (Exit Code: {result.returncode})")
         print("-" * 45)
         print("✅ 測試執行完成！即將進入常規排程循環...")
         
@@ -212,18 +204,17 @@ def main():
             print("\n⏰ 觸發時間已到！正在啟動量化特徵分析與策略推理...")
             print("-" * 45)
             
+            # 判斷是否需要新聞 (只有 9:00 盤前 與 16:00 收盤 需要新聞，其餘跳過)
+            cmd_args = [sys.executable, script_path]
+            if not ((next_run.hour == 9 and next_run.minute == 0) or (next_run.hour == 16 and next_run.minute == 0)):
+                cmd_args.append("--skip-news")
+                print("ℹ️ 本次執行為盤中更新，將自動附加 --skip-news 以節省 Token 與網路請求。")
+                
             # 呼叫主程式執行
-            result = subprocess.run(
-                [sys.executable, script_path],
-                capture_output=True,
-                text=True,
-                encoding="utf-8"
-            )
+            result = subprocess.run(cmd_args)
             
-            print(result.stdout)
-            if result.stderr:
-                print("⚠️ 錯誤日誌輸出：")
-                print(result.stderr)
+            if result.returncode != 0:
+                print(f"\n⚠️ 分析程式執行時發生異常 (Exit Code: {result.returncode})")
                 
             print("-" * 45)
             print(f"✅ 排程任務執行完成。時間: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")

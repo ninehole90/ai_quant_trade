@@ -2,10 +2,16 @@ import os
 import sys
 import requests
 import time
+import datetime
 import yfinance as yf
 import pandas as pd
 from google import genai
 from google.genai.errors import ServerError
+
+try:
+    from quant_brain import earnings_agent
+except ImportError:
+    import earnings_agent
 
 # 解決 Windows 終端機 Unicode 輸出編碼錯誤問題 (CP950/CP936)
 if sys.platform.startswith('win') and getattr(sys.stdout, 'encoding', '') != 'utf-8':
@@ -66,8 +72,9 @@ def load_watch_list(file_path="watch_list.txt", default_list=None):
     return watch_list if watch_list else default_list
 
 # ==================== 2026 核心配置區 ====================
-TG_BOT_TOKEN = "8867246156:AAEDKffvwxxcihuAnp8FUEuaOWI_pZ9L4X0" # 確保這是活著的那組
-TG_CHAT_ID = "6235795101"
+# 安全警示：請勿在程式碼中硬編碼您的 Token！請將金鑰寫在本地的 .env 檔案中。
+TG_BOT_TOKEN = "" 
+TG_CHAT_ID = ""
 # =======================================================
 
 def calculate_indicators(df):
@@ -150,7 +157,10 @@ def get_stock_report(ticker, skip_news=False):
 
     return {
         "ticker": ticker,
+        "open": float(latest['Open']),
         "close": float(latest['Close']),
+        "change": float(latest['Close'] - latest['Open']),
+        "change_pct": float((latest['Close'] - latest['Open']) / latest['Open'] * 100),
         "ma20": float(latest['MA20']),
         "upper": float(latest['Upper_Band']),
         "lower": float(latest['Lower_Band']),
@@ -169,10 +179,31 @@ def main():
     TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", TG_BOT_TOKEN)
     TG_CHAT_ID = os.environ.get("TG_CHAT_ID", TG_CHAT_ID)
 
-    # 檢查是否跳過新聞
+    # 檢查命令列參數
     skip_news = "--skip-news" in sys.argv
     if skip_news:
         print("ℹ️ 本次執行已設定跳過新聞抓取 (節省 Token 與 API 請求)")
+        
+    check_earnings = "--check-earnings" in sys.argv or "--only-earnings" in sys.argv
+    force_earnings = "--force-earnings" in sys.argv
+    only_earnings = "--only-earnings" in sys.argv
+
+    if only_earnings:
+        print("ℹ️ 已設定 --only-earnings，將跳過技術指標分析，直接執行財報掃描。")
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            print("\n❌ 錯誤：找不到 Gemini API 金鑰 (GEMINI_API_KEY)！")
+            return
+        watch_list = load_watch_list()
+        earnings_agent.scan_and_report_earnings(
+            watch_list=watch_list,
+            api_key=api_key,
+            bot_token=TG_BOT_TOKEN,
+            chat_id=TG_CHAT_ID,
+            days_window=5,
+            force_earnings=force_earnings
+        )
+        return
 
     print("1. 🚀 啟動美股量化特徵篩選引擎...")
     watch_list = load_watch_list()
@@ -207,7 +238,9 @@ def main():
         data_context += (
             f"股票: {r['ticker']}\n"
             f"  [技術指標]:\n"
-            f"    - 收盤價: ${r['close']:.2f}\n"
+            f"    - 開盤價: ${r['open']:.2f}\n"
+            f"    - 收盤價/現價: ${r['close']:.2f}\n"
+            f"    - 今日漲跌: {r['change']:+.2f} (今日漲跌幅: {r['change_pct']:+.2f}%)\n"
             f"    - 20日均線(MA20): ${r['ma20']:.2f}\n"
             f"    - 布林通道上軌: ${r['upper']:.2f}, 下軌: ${r['lower']:.2f}\n"
             f"    - RSI (14日): {r['rsi']:.1f}\n"
@@ -281,7 +314,7 @@ def main():
     4. 嚴禁輸出任何 Markdown 的星號（*）或黑點（•）。
     5. 每一檔個股的分析請嚴格依照以下範例格式輸出，不要有多餘的廢話，內容必須精煉：
     
-    📌 <b>[股票代碼]</b> ({price_label}: <code>[{price_label}]</code>)
+    📌 <b>[股票代碼]</b> (開盤價: <code>[開盤價]</code>)({price_label}: <code>[{price_label}]</code>) 漲跌: <code>[今日漲跌]</code> 漲跌幅: <code>[今日漲跌幅]</code>
     • 20日均線: <code>[MA20]</code> | RSI: <code>[RSI]</code> | PE: <code>[PE]</code>
     • 策略短評: [結合技術指標{strategy_brief}，進行兩到三句話的綜合分析。若觸發超買超賣，請在此加上 <b>【短線超買過熱】</b> 或 <b>【短線超跌打底】</b> 的粗體警示。]
     
@@ -358,6 +391,17 @@ def main():
         print("🎉 恭喜！全新的精美量化選股報告已成功送達你的手機！")
     else:
         print(f"❌ 傳送失敗: {r.text}")
+
+    # 執行常規財報掃描 (Stage 2)
+    if check_earnings:
+        earnings_agent.scan_and_report_earnings(
+            watch_list=watch_list,
+            api_key=api_key,
+            bot_token=TG_BOT_TOKEN,
+            chat_id=TG_CHAT_ID,
+            days_window=5,
+            force_earnings=force_earnings
+        )
 
 if __name__ == "__main__":
     main()
